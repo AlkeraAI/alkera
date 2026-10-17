@@ -1,0 +1,11 @@
+global:
+  scrape_interval: 5s
+  evaluation_interval: 5s
+
+scrape_configs:
+  - job_name: "alkera-data-layer"
+    static_configs:
+      - targets:
+          - "host.docker.internal:9100"
+          - "redpanda-0:9644"
+    metrics_path: /public_metrics

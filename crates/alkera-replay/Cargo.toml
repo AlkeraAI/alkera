@@ -1,0 +1,20 @@
+[package]
+name = "alkera-replay"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+
+[dependencies]
+alkera-book.workspace = true
+alkera-schema.workspace = true
+thiserror.workspace = true
+
+[dev-dependencies]
+alkera-catalog.workspace = true
+alkera-collector.workspace = true
+alkera-merger.workspace = true
+alkera-sink-clickhouse.workspace = true
+alkera-sink-parquet.workspace = true
+alkera-wal.workspace = true
+serde_json.workspace = true
+tempfile.workspace = true

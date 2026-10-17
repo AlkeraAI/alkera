@@ -1,0 +1,13 @@
+[package]
+name = "alkera-merger"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+
+[dependencies]
+alkera-book.workspace = true
+alkera-schema.workspace = true
+dashmap.workspace = true
+parking_lot.workspace = true
+serde.workspace = true
+thiserror.workspace = true

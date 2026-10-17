@@ -1,0 +1,57 @@
+[workspace]
+resolver = "2"
+members = [
+    "crates/alkera-schema",
+    "crates/alkera-catalog",
+    "crates/alkera-wal",
+    "crates/alkera-book",
+    "crates/alkera-collector",
+    "crates/alkera-merger",
+    "crates/alkera-sink-clickhouse",
+    "crates/alkera-sink-parquet",
+    "crates/alkera-replay",
+]
+
+[workspace.package]
+version = "0.1.0"
+edition = "2021"
+license = "MIT OR Apache-2.0"
+authors = ["Alkera Engineering"]
+
+[workspace.dependencies]
+anyhow = "1.0"
+arc-swap = "1.7"
+arrow-array = "=52.2.0"
+arrow-schema = "=52.2.0"
+base64 = "=0.22.1"
+bytecheck = "0.6"
+bytes = "1.7"
+chrono = { version = "0.4", features = ["serde"] }
+crc32c = "0.6"
+dashmap = "6.1"
+ed25519-dalek = { version = "=2.1.1", features = ["pkcs8", "pem"] }
+hex = "0.4"
+memmap2 = "0.9"
+parking_lot = "0.12"
+parquet = { version = "=52.2.0", default-features = false, features = ["arrow", "zstd", "snap"] }
+rkyv = { version = "0.7", features = ["validation", "strict"] }
+serde = { version = "1.0", features = ["derive"] }
+serde_json = "1.0"
+sha2 = "0.10"
+tempfile = "=3.14.0"
+thiserror = "1.0"
+tokio = { version = "=1.41.1", features = ["rt-multi-thread", "macros", "sync", "time", "fs", "io-util"] }
+tracing = "0.1"
+uuid = { version = "=1.11.0", features = ["v4", "serde"] }
+xxhash-rust = { version = "0.8", features = ["xxh3", "xxh64"] }
+zstd = "0.13"
+
+alkera-schema = { path = "crates/alkera-schema" }
+alkera-catalog = { path = "crates/alkera-catalog" }
+alkera-wal = { path = "crates/alkera-wal" }
+alkera-book = { path = "crates/alkera-book" }
+alkera-collector = { path = "crates/alkera-collector" }
+alkera-merger = { path = "crates/alkera-merger" }
+alkera-sink-clickhouse = { path = "crates/alkera-sink-clickhouse" }
+alkera-sink-parquet = { path = "crates/alkera-sink-parquet" }
+alkera-replay = { path = "crates/alkera-replay" }

@@ -1,0 +1,11 @@
+/target/
+*.wal
+*.parquet
+.env
+.env.*
+*.env
+*.pem
+*.key
+*credentials*
+*secret*
+!.env.example

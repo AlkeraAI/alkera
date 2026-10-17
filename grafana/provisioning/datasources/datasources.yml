@@ -1,0 +1,34 @@
+apiVersion: 1
+
+datasources:
+  - name: Prometheus
+    type: prometheus
+    uid: alkera-prometheus
+    access: proxy
+    url: http://prometheus:9090
+    isDefault: true
+    editable: false
+
+  - name: PostgreSQL-Catalog
+    type: postgres
+    uid: alkera-postgres
+    url: postgres-catalog:5432
+    user: alkera
+    secureJsonData:
+      password: alkera_ha_password
+    jsonData:
+      database: alkera_catalog
+      sslmode: disable
+      postgresVersion: 1700
+    editable: false
+
+  - name: ClickHouse-MarketData
+    type: grafana-clickhouse-datasource
+    uid: alkera-clickhouse
+    jsonData:
+      defaultDatabase: market_data
+      port: 9000
+      server: clickhouse-01
+      username: default
+      tlsSkipVerify: true
+    editable: false

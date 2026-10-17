@@ -1,0 +1,147 @@
+services:
+  postgres-catalog:
+    image: postgres:17-alpine
+    container_name: alkera-postgres-catalog
+    environment:
+      POSTGRES_USER: alkera
+      POSTGRES_PASSWORD: alkera_ha_password
+      POSTGRES_DB: alkera_catalog
+    ports:
+      - "5432:5432"
+    volumes:
+      - ../migrations/postgres:/docker-entrypoint-initdb.d:ro
+      - pg_catalog_data:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U alkera -d alkera_catalog"]
+      interval: 5s
+      timeout: 5s
+      retries: 10
+
+  localstack:
+    image: localstack/localstack:3.8
+    container_name: alkera-localstack-aws
+    ports:
+      - "4566:4566"
+    environment:
+      SERVICES: s3,secretsmanager,ssm,kms
+      DEFAULT_REGION: us-east-2
+      AWS_DEFAULT_REGION: us-east-2
+      AWS_ACCESS_KEY_ID: test
+      AWS_SECRET_ACCESS_KEY: test
+      EAGER_SERVICE_LOADING: 1
+    volumes:
+      - ./localstack/init-aws.sh:/etc/localstack/init/ready.d/init-aws.sh:ro
+      - localstack_data:/var/lib/localstack
+    healthcheck:
+      test: ["CMD", "awslocal", "s3api", "head-bucket", "--bucket", "alkera-parquet-lakehouse"]
+      interval: 5s
+      timeout: 5s
+      retries: 15
+
+  redpanda-0:
+    image: docker.redpanda.com/redpandadata/redpanda:v24.2.8
+    container_name: alkera-redpanda-0
+    depends_on:
+      localstack:
+        condition: service_healthy
+    command:
+      - redpanda
+      - start
+      - --smp 2
+      - --memory 2G
+      - --reserve-memory 0M
+      - --overprovisioned
+      - --node-id 0
+      - --kafka-addr internal://0.0.0.0:9092,external://0.0.0.0:19092
+      - --advertise-kafka-addr internal://redpanda-0:9092,external://localhost:19092
+      - --pandaproxy-addr internal://0.0.0.0:8082,external://0.0.0.0:18082
+      - --advertise-pandaproxy-addr internal://redpanda-0:8082,external://localhost:18082
+      - --schema-registry-addr internal://0.0.0.0:8081,external://0.0.0.0:18081
+      - --rpc-addr redpanda-0:33145
+      - --advertise-rpc-addr redpanda-0:33145
+    ports:
+      - "19092:19092"
+      - "18081:18081"
+      - "18082:18082"
+      - "9644:9644"
+    volumes:
+      - redpanda_data:/var/lib/redpanda/data
+
+  clickhouse-keeper:
+    image: clickhouse/clickhouse-keeper:24.8-alpine
+    container_name: alkera-clickhouse-keeper
+    ports:
+      - "9181:9181"
+    volumes:
+      - ./clickhouse/keeper_config.xml:/etc/clickhouse-keeper/keeper_config.xml:ro
+      - ch_keeper_data:/var/lib/clickhouse
+
+  clickhouse-01:
+    image: clickhouse/clickhouse-server:24.8-alpine
+    container_name: alkera-clickhouse-01
+    depends_on:
+      clickhouse-keeper:
+        condition: service_started
+      localstack:
+        condition: service_healthy
+    ports:
+      - "8123:8123"
+      - "9009:9000"
+    volumes:
+      - ./clickhouse/replica-01-macros.xml:/etc/clickhouse-server/config.d/macros.xml:ro
+      - ../migrations/clickhouse:/docker-entrypoint-initdb.d:ro
+      - ch_replica_01_data:/var/lib/clickhouse
+
+  clickhouse-02:
+    image: clickhouse/clickhouse-server:24.8-alpine
+    container_name: alkera-clickhouse-02
+    depends_on:
+      clickhouse-keeper:
+        condition: service_started
+      localstack:
+        condition: service_healthy
+    ports:
+      - "8124:8123"
+      - "9010:9000"
+    volumes:
+      - ./clickhouse/replica-02-macros.xml:/etc/clickhouse-server/config.d/macros.xml:ro
+      - ../migrations/clickhouse:/docker-entrypoint-initdb.d:ro
+      - ch_replica_02_data:/var/lib/clickhouse
+
+  prometheus:
+    image: prom/prometheus:v2.54.1
+    container_name: alkera-prometheus
+    ports:
+      - "9090:9090"
+    volumes:
+      - ./prometheus/prometheus.yml:/etc/prometheus/prometheus.yml:ro
+      - prometheus_data:/prometheus
+
+  grafana:
+    image: grafana/grafana:11.2.2
+    container_name: alkera-grafana
+    depends_on:
+      - prometheus
+      - postgres-catalog
+      - clickhouse-01
+    environment:
+      GF_SECURITY_ADMIN_USER: admin
+      GF_SECURITY_ADMIN_PASSWORD: alkera_grafana_admin
+      GF_INSTALL_PLUGINS: grafana-clickhouse-datasource
+      GF_DASHBOARDS_DEFAULT_HOME_DASHBOARD_PATH: /var/lib/grafana/dashboards/alkera-unified-observability.json
+    ports:
+      - "3000:3000"
+    volumes:
+      - ../grafana/provisioning:/etc/grafana/provisioning:ro
+      - ../grafana/dashboards:/var/lib/grafana/dashboards:ro
+      - grafana_data:/var/lib/grafana
+
+volumes:
+  pg_catalog_data:
+  localstack_data:
+  redpanda_data:
+  ch_keeper_data:
+  ch_replica_01_data:
+  ch_replica_02_data:
+  prometheus_data:
+  grafana_data:

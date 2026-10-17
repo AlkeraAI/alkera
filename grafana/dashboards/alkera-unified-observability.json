@@ -1,0 +1,310 @@
+{
+  "uid": "alkera-unified-observability",
+  "title": "Alkera Unified Observability — Kalshi HA Capture, Deduplication, Storage & ULL Fast-Tap",
+  "description": "Single-pane-of-glass observability across Kalshi WebSocket v2 Collectors, Active-Active A/B Deduplicator & FlatOrderBook Engine, Storage Pipeline (NVMe WAL, Redpanda, PostgreSQL, ClickHouse, LocalStack S3 Parquet), and ULL Fast-Tap & Host Health.",
+  "tags": ["alkera", "kalshi", "ha", "storage", "clickhouse", "redpanda", "localstack", "ull"],
+  "timezone": "utc",
+  "schemaVersion": 39,
+  "version": 1,
+  "refresh": "5s",
+  "time": {
+    "from": "now-1h",
+    "to": "now"
+  },
+  "panels": [
+    {
+      "id": 100,
+      "type": "row",
+      "title": "1. Live Kalshi WebSocket Collector & Discovery (WS Frames/s, Active Subscriptions, (sid, seq) Gaps, Snapshot Recoveries, REST Token-Bucket Headroom)",
+      "collapsed": false,
+      "gridPos": { "h": 1, "w": 24, "x": 0, "y": 0 }
+    },
+    {
+      "id": 101,
+      "title": "Kalshi WebSocket v2 Frame Rate by Channel & Leg (Frames/sec)",
+      "type": "timeseries",
+      "gridPos": { "h": 7, "w": 8, "x": 0, "y": 1 },
+      "datasource": { "type": "prometheus", "uid": "alkera-prometheus" },
+      "targets": [
+        {
+          "refId": "A",
+          "expr": "sum by (collector_leg, channel) (rate(alkera_kalshi_ws_frames_total[1m]))",
+          "legendFormat": "Leg {{collector_leg}} - {{channel}}"
+        }
+      ]
+    },
+    {
+      "id": 102,
+      "title": "Active Subscribed Kalshi Markets & Sharded WS Connections",
+      "type": "stat",
+      "gridPos": { "h": 7, "w": 5, "x": 8, "y": 1 },
+      "datasource": { "type": "prometheus", "uid": "alkera-prometheus" },
+      "targets": [
+        {
+          "refId": "A",
+          "expr": "sum by (collector_leg) (alkera_kalshi_subscribed_markets)",
+          "legendFormat": "Leg {{collector_leg}} Markets"
+        },
+        {
+          "refId": "B",
+          "expr": "sum by (collector_leg) (alkera_kalshi_active_ws_sockets)",
+          "legendFormat": "Leg {{collector_leg}} Sockets"
+        }
+      ]
+    },
+    {
+      "id": 103,
+      "title": "Kalshi (sid, seq) Gaps & In-Place get_snapshot Recoveries",
+      "type": "timeseries",
+      "gridPos": { "h": 7, "w": 6, "x": 13, "y": 1 },
+      "datasource": { "type": "prometheus", "uid": "alkera-prometheus" },
+      "targets": [
+        {
+          "refId": "A",
+          "expr": "sum by (collector_leg) (increase(alkera_kalshi_sid_seq_gaps_total[5m]))",
+          "legendFormat": "Leg {{collector_leg}} (sid, seq) Gaps"
+        },
+        {
+          "refId": "B",
+          "expr": "sum by (collector_leg) (increase(alkera_kalshi_snapshot_recoveries_total[5m]))",
+          "legendFormat": "Leg {{collector_leg}} Snapshot Recoveries"
+        }
+      ]
+    },
+    {
+      "id": 104,
+      "title": "Kalshi REST v2 Read Token-Bucket Headroom (%)",
+      "type": "gauge",
+      "gridPos": { "h": 7, "w": 5, "x": 19, "y": 1 },
+      "datasource": { "type": "prometheus", "uid": "alkera-prometheus" },
+      "targets": [
+        {
+          "refId": "A",
+          "expr": "100 * (alkera_kalshi_rest_read_tokens_available / clamp_min(alkera_kalshi_rest_read_tokens_capacity, 1))",
+          "legendFormat": "Read Bucket Headroom %"
+        }
+      ]
+    },
+    {
+      "id": 200,
+      "type": "row",
+      "title": "2. Active-Active Deduplicator & Orderbook Engine (Fast-First Dedup Rate, Leg A/B Skew Histogram, FlatOrderBook Latency p50/p99/p99.99, ClickHouse capture_gaps Audit)",
+      "collapsed": false,
+      "gridPos": { "h": 1, "w": 24, "x": 0, "y": 8 }
+    },
+    {
+      "id": 201,
+      "title": "Fast-First Primary Emissions vs Suppressed Twin Duplicates (Events/s)",
+      "type": "timeseries",
+      "gridPos": { "h": 7, "w": 6, "x": 0, "y": 9 },
+      "datasource": { "type": "prometheus", "uid": "alkera-prometheus" },
+      "targets": [
+        {
+          "refId": "A",
+          "expr": "rate(alkera_merger_primary_emitted_total[1m])",
+          "legendFormat": "Primary Winner Emitted"
+        },
+        {
+          "refId": "B",
+          "expr": "rate(alkera_merger_twin_duplicates_suppressed_total[1m])",
+          "legendFormat": "Twin Duplicate Suppressed"
+        }
+      ]
+    },
+    {
+      "id": 202,
+      "title": "Leg A vs Leg B Arrival Skew Distribution (Microseconds)",
+      "type": "timeseries",
+      "gridPos": { "h": 7, "w": 6, "x": 6, "y": 9 },
+      "datasource": { "type": "grafana-clickhouse-datasource", "uid": "alkera-clickhouse" },
+      "targets": [
+        {
+          "refId": "A",
+          "rawSql": "SELECT toStartOfMinute(fromUnixTimestamp64Milli(exchange_ts_ms)) AS time, quantileExact(0.50)(abs(toInt64(leg_a_recv_ns) - toInt64(leg_b_recv_ns)) / 1000.0) AS p50_skew_us, quantileExact(0.99)(abs(toInt64(leg_a_recv_ns) - toInt64(leg_b_recv_ns)) / 1000.0) AS p99_skew_us FROM market_data.trades FINAL WHERE venue_id = 1 AND leg_a_recv_ns > 0 AND leg_b_recv_ns > 0 GROUP BY time ORDER BY time ASC"
+        }
+      ]
+    },
+    {
+      "id": 203,
+      "title": "FlatOrderBook Parse + Apply Latency (p50 / p99 / p99.99 ns)",
+      "type": "timeseries",
+      "gridPos": { "h": 7, "w": 6, "x": 12, "y": 9 },
+      "datasource": { "type": "prometheus", "uid": "alkera-prometheus" },
+      "targets": [
+        {
+          "refId": "A",
+          "expr": "histogram_quantile(0.50, sum(rate(alkera_flat_orderbook_apply_ns_bucket[1m])) by (le))",
+          "legendFormat": "p50 (ns)"
+        },
+        {
+          "refId": "B",
+          "expr": "histogram_quantile(0.99, sum(rate(alkera_flat_orderbook_apply_ns_bucket[1m])) by (le))",
+          "legendFormat": "p99 (ns)"
+        },
+        {
+          "refId": "C",
+          "expr": "histogram_quantile(0.9999, sum(rate(alkera_flat_orderbook_apply_ns_bucket[1m])) by (le))",
+          "legendFormat": "p99.99 (ns)"
+        }
+      ]
+    },
+    {
+      "id": 204,
+      "title": "ClickHouse capture_gaps Audit: Twin-Healed vs Out-of-Band Resync",
+      "type": "table",
+      "gridPos": { "h": 7, "w": 6, "x": 18, "y": 9 },
+      "datasource": { "type": "grafana-clickhouse-datasource", "uid": "alkera-clickhouse" },
+      "targets": [
+        {
+          "refId": "A",
+          "rawSql": "SELECT gap_type, countIf(healed_by_twin_leg = 1) AS twin_healed_zero_loss, countIf(healed_by_twin_leg = 0) AS required_resync FROM market_data.capture_gaps FINAL WHERE venue_id = 1 GROUP BY gap_type"
+        }
+      ]
+    },
+    {
+      "id": 300,
+      "type": "row",
+      "title": "3. Storage Pipeline & Lakehouse (NVMe WAL Ring Lag, Redpanda Throughput, PostgreSQL catalog.instruments, ClickHouse Rows/s & Compression, LocalStack S3 Parquet)",
+      "collapsed": false,
+      "gridPos": { "h": 1, "w": 24, "x": 0, "y": 16 }
+    },
+    {
+      "id": 301,
+      "title": "Local NVMe WAL Ring Uncommitted Bytes & Lag per Leg",
+      "type": "timeseries",
+      "gridPos": { "h": 7, "w": 5, "x": 0, "y": 17 },
+      "datasource": { "type": "prometheus", "uid": "alkera-prometheus" },
+      "targets": [
+        {
+          "refId": "A",
+          "expr": "alkera_wal_uncommitted_bytes",
+          "legendFormat": "Leg {{collector_leg}} Uncommitted WAL Bytes"
+        }
+      ]
+    },
+    {
+      "id": 302,
+      "title": "Redpanda Broker & Topic Throughput (Bytes/sec)",
+      "type": "timeseries",
+      "gridPos": { "h": 7, "w": 5, "x": 5, "y": 17 },
+      "datasource": { "type": "prometheus", "uid": "alkera-prometheus" },
+      "targets": [
+        {
+          "refId": "A",
+          "expr": "sum by (topic) (rate(vectorized_kafka_rpc_Produce_bytes_total[1m]))",
+          "legendFormat": "Topic {{topic}}"
+        }
+      ]
+    },
+    {
+      "id": 303,
+      "title": "PostgreSQL Catalog: Active Kalshi Instruments by Tier",
+      "type": "table",
+      "gridPos": { "h": 7, "w": 4, "x": 10, "y": 17 },
+      "datasource": { "type": "postgres", "uid": "alkera-postgres" },
+      "targets": [
+        {
+          "refId": "A",
+          "format": "table",
+          "rawSql": "SELECT v.code AS venue, i.activity_tier, COUNT(*) AS instruments FROM catalog.instruments i JOIN catalog.venues v ON v.venue_id = i.venue_id WHERE i.venue_id = 1 AND i.is_active = true GROUP BY v.code, i.activity_tier ORDER BY i.activity_tier;"
+        }
+      ]
+    },
+    {
+      "id": 304,
+      "title": "ClickHouse Hot Store: Rows, Compression Ratio & Bytes/Row",
+      "type": "table",
+      "gridPos": { "h": 7, "w": 5, "x": 14, "y": 17 },
+      "datasource": { "type": "grafana-clickhouse-datasource", "uid": "alkera-clickhouse" },
+      "targets": [
+        {
+          "refId": "A",
+          "rawSql": "SELECT table, total_rows, compressed_bytes, compression_ratio, compressed_bytes_per_row FROM market_data.v_table_compression_stats"
+        }
+      ]
+    },
+    {
+      "id": 305,
+      "title": "LocalStack S3 Parquet Partitions Flushed (Files & Bytes)",
+      "type": "timeseries",
+      "gridPos": { "h": 7, "w": 5, "x": 19, "y": 17 },
+      "datasource": { "type": "prometheus", "uid": "alkera-prometheus" },
+      "targets": [
+        {
+          "refId": "A",
+          "expr": "rate(alkera_s3_parquet_bytes_written_total[5m])",
+          "legendFormat": "Parquet ZSTD-9 Bytes/s"
+        },
+        {
+          "refId": "B",
+          "expr": "increase(alkera_s3_parquet_files_committed_total[15m])",
+          "legendFormat": "Partitions Committed (15m)"
+        }
+      ]
+    },
+    {
+      "id": 400,
+      "type": "row",
+      "title": "4. ULL Fast-Tap & Host Health (Shared-Memory SPSC Ring Lag, CPU/Memory Utilization, PTP Clock Sync Offset)",
+      "collapsed": false,
+      "gridPos": { "h": 1, "w": 24, "x": 0, "y": 24 }
+    },
+    {
+      "id": 401,
+      "title": "ULL Shared-Memory SPSC Ring Buffer Handoff Lag (ns)",
+      "type": "timeseries",
+      "gridPos": { "h": 7, "w": 8, "x": 0, "y": 25 },
+      "datasource": { "type": "prometheus", "uid": "alkera-prometheus" },
+      "targets": [
+        {
+          "refId": "A",
+          "expr": "histogram_quantile(0.99, sum(rate(alkera_ull_fast_tap_handoff_ns_bucket[1m])) by (le))",
+          "legendFormat": "p99 Fast-Tap Handoff (ns)"
+        },
+        {
+          "refId": "B",
+          "expr": "alkera_ull_fast_tap_ring_pending_slots",
+          "legendFormat": "Pending Ring Slots"
+        }
+      ]
+    },
+    {
+      "id": 402,
+      "title": "Collector & Merger Process CPU & Resident Memory (RSS MB)",
+      "type": "timeseries",
+      "gridPos": { "h": 7, "w": 8, "x": 8, "y": 25 },
+      "datasource": { "type": "prometheus", "uid": "alkera-prometheus" },
+      "targets": [
+        {
+          "refId": "A",
+          "expr": "process_resident_memory_bytes / 1048576",
+          "legendFormat": "{{job}} RSS (MB)"
+        },
+        {
+          "refId": "B",
+          "expr": "rate(process_cpu_seconds_total[1m]) * 100",
+          "legendFormat": "{{job}} CPU %"
+        }
+      ]
+    },
+    {
+      "id": 403,
+      "title": "PTP / Chrony Hardware Clock Sync Offset (Microseconds) & Kalshi Clock Skew",
+      "type": "timeseries",
+      "gridPos": { "h": 7, "w": 8, "x": 16, "y": 25 },
+      "datasource": { "type": "prometheus", "uid": "alkera-prometheus" },
+      "targets": [
+        {
+          "refId": "A",
+          "expr": "alkera_host_clock_offset_ns / 1000.0",
+          "legendFormat": "PTP Clock Offset (us)"
+        },
+        {
+          "refId": "B",
+          "expr": "alkera_kalshi_one_way_transit_ms",
+          "legendFormat": "Kalshi recv_ts - sending_ts (ms)"
+        }
+      ]
+    }
+  ]
+}

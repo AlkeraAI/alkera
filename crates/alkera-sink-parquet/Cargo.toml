@@ -1,0 +1,15 @@
+[package]
+name = "alkera-sink-parquet"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+
+[dependencies]
+alkera-schema.workspace = true
+arrow-array.workspace = true
+arrow-schema.workspace = true
+parquet.workspace = true
+thiserror.workspace = true
+
+[dev-dependencies]
+tempfile.workspace = true

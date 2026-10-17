@@ -1,0 +1,23 @@
+[package]
+name = "alkera-collector"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+
+[features]
+default = ["kalshi"]
+kalshi = []
+polymarket = []
+
+[dependencies]
+alkera-book.workspace = true
+alkera-catalog.workspace = true
+alkera-schema.workspace = true
+alkera-wal.workspace = true
+base64.workspace = true
+ed25519-dalek.workspace = true
+hex.workspace = true
+serde.workspace = true
+serde_json.workspace = true
+thiserror.workspace = true
+xxhash-rust.workspace = true
