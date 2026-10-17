@@ -1,0 +1,20 @@
+# =============================================================================
+# Project Bond Terraform Variables Example (AWS us-east-2 Kalshi Production)
+# Copy to prod.tfvars and set use_localstack = false for live AWS deployment
+# =============================================================================
+project_name             = "bond"
+environment              = "prod"
+use_localstack           = false
+enable_polymarket        = false
+s3_lakehouse_bucket_name = "bond-prod-kalshi-parquet-lakehouse"
+
+# Physical AWS Availability Zone IDs in us-east-2 (Ohio)
+use2_physical_az_ids = ["use2-az1", "use2-az2", "use2-az3"]
+
+# Compute Sizing
+ull_instance_type       = "c7i.4xlarge"
+collector_instance_type = "c7i.2xlarge"
+data_node_instance_type = "r7i.2xlarge"
+
+# Operator CIDR allowed to reach Grafana (:3000)
+admin_ingress_cidrs = ["10.0.0.0/8"]

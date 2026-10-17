@@ -1,0 +1,97 @@
+#cloud-config
+package_update: true
+package_upgrade: false
+packages:
+  - chrony
+  - ethtool
+  - nvme-cli
+  - xfsprogs
+  - jq
+  - curl
+  - ca-certificates
+
+write_files:
+  - path: /etc/sysctl.d/99-alkera-collector.conf
+    permissions: "0644"
+    owner: root:root
+    content: |
+      net.ipv4.tcp_slow_start_after_idle = 0
+      net.ipv4.tcp_tw_reuse = 1
+      net.ipv4.tcp_timestamps = 1
+      net.ipv4.tcp_sack = 1
+      net.ipv4.tcp_congestion_control = bbr
+      net.core.default_qdisc = fq
+      net.core.busy_poll = 25
+      net.core.busy_read = 25
+      net.core.rmem_max = 33554432
+      net.core.wmem_max = 33554432
+      net.core.netdev_max_backlog = 65536
+      vm.swappiness = 1
+      vm.max_map_count = 1048576
+      fs.suid_dumpable = 0
+
+  - path: /etc/chrony/conf.d/00-aws-nitro-ptp.conf
+    permissions: "0644"
+    owner: root:root
+    content: |
+      refclock PHC /dev/ptp0 poll 0 dpoll -2 offset 0 prefer
+      makestep 0.001 3
+      maxupdateskew 5.0
+
+  - path: /etc/bond/collector.env
+    permissions: "0600"
+    owner: root:root
+    content: |
+      BOND_ENVIRONMENT="${environment}"
+      BOND_REGION="${region}"
+      BOND_VENUE="${venue}"
+      BOND_COLLECTOR_LEG="${collector_leg}"
+      BOND_WAL_DIR="/var/lib/alkera/wal"
+      BOND_SHM_RING_PATH="/dev/shm/bond_fast_md.ring"
+      BOND_REDPANDA_BROKERS="${redpanda_brokers}"
+      BOND_POSTGRES_HOST="${postgres_host}"
+      BOND_S3_LAKEHOUSE_BUCKET="${s3_bucket_name}"
+      BOND_SECRETS_PREFIX="${secrets_prefix}"
+      KALSHI_REST_URL="https://external-api.kalshi.com/trade-api/v2"
+      KALSHI_WS_URL="wss://external-api-ws.kalshi.com/trade-api/ws/v2"
+      KALSHI_API_KEY_SECRET_ID="${secrets_prefix}/kalshi/capture_leg_${collector_leg}_ed25519"
+      KALSHI_PRIVATE_KEY_PATH="/etc/bond/secrets/kalshi_capture_${collector_leg}_ed25519.pem"
+
+  - path: /etc/systemd/system/alkera-collector.service
+    permissions: "0644"
+    owner: root:root
+    content: |
+      [Unit]
+      Description=Project Bond HA Market Data Collector (${venue} Leg ${collector_leg})
+      After=network-online.target chrony.service
+      Wants=network-online.target chrony.service
+
+      [Service]
+      Type=simple
+      User=ubuntu
+      WorkingDirectory=/opt/bond
+      EnvironmentFile=/etc/bond/collector.env
+      ExecStart=/opt/bond/bin/alkera-collector \
+        --venue ${venue} \
+        --leg ${collector_leg} \
+        --wal-dir /var/lib/alkera/wal \
+        --shm-fast-tap /dev/shm/bond_fast_md.ring \
+        --metrics-listen 0.0.0.0:9108
+      Restart=always
+      RestartSec=1
+      LimitMEMLOCK=infinity
+      LimitNOFILE=1048576
+      LimitCORE=0
+
+      [Install]
+      WantedBy=multi-user.target
+
+runcmd:
+  - mkdir -p /opt/bond/bin /var/lib/alkera/wal /etc/bond/secrets
+  - chmod 0700 /etc/bond/secrets
+  - chown -R ubuntu:ubuntu /opt/bond /var/lib/alkera
+  - mount -o remount,size=4G,mode=1777 /dev/shm || true
+  - modprobe ptp_ena || true
+  - sysctl --system
+  - systemctl restart chrony || true
+  - systemctl daemon-reload

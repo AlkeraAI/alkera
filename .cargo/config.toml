@@ -1,0 +1,22 @@
+# =============================================================================
+# Project Bond — Deterministic Rust Build, Lint & Regression Test Configuration
+# =============================================================================
+
+[env]
+# Disable incremental compilation in release/CI builds for deterministic codegen
+CARGO_INCREMENTAL = "0"
+# Persist proptest failure seeds deterministically in repo
+PROPTEST_CASES = "2048"
+
+[target.x86_64-unknown-linux-gnu]
+rustflags = [
+    "-C", "target-cpu=x86-64-v3",
+    "-C", "target-feature=+aes,+ssse3,+sse4.2,+avx2,+sha,+bmi2",
+    "-D", "unsafe_op_in_unsafe_fn",
+]
+
+[alias]
+# Strict deterministic lint & test aliases enforced in CI
+lint-strict = "clippy --workspace --all-targets --locked -- -D warnings -D clippy::float_arithmetic -D clippy::unwrap_used -D clippy::expect_used -D clippy::panic"
+test-unit = "test --workspace --lib --bins --locked"
+test-regression = "test --workspace --tests --locked --release"

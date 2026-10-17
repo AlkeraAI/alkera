@@ -1,0 +1,28 @@
+# Rust / Cargo
+/target/
+**/*.rs.bk
+
+# Terraform
+**/.terraform/*
+*.tfstate
+*.tfstate.*
+crash.log
+crash.*.log
+override.tf
+override.tf.json
+*_override.tf
+*_override.tf.json
+.terraformrc
+terraform.rc
+
+# Secrets & Local Env (Never commit credentials or PEM keys)
+.env
+.env.*
+!.env.example
+*.pem
+*.key
+prod.tfvars
+
+# Local WAL / Spool
+/spool/
+*.wal

@@ -1,0 +1,49 @@
+# =============================================================================
+# Project Bond — cargo-deny Supply-Chain, License & Determinism Policy
+# Run with: cargo deny check advisories bans licenses sources
+# =============================================================================
+
+[graph]
+targets = [
+    { triple = "x86_64-unknown-linux-gnu" },
+]
+all-features = true
+
+[advisories]
+version = 2
+db-path = "~/.cargo/advisory-db"
+db-urls = ["https://github.com/rustsec/advisory-db"]
+yanked = "deny"
+unmaintained = "warn"
+
+[licenses]
+version = 2
+confidence-threshold = 0.8
+allow = [
+    "MIT",
+    "Apache-2.0",
+    "Apache-2.0 WITH LLVM-exception",
+    "BSD-2-Clause",
+    "BSD-3-Clause",
+    "ISC",
+    "Unicode-3.0",
+    "Unicode-DFS-2016",
+    "Zlib",
+    "CC0-1.0",
+]
+
+[bans]
+multiple-versions = "warn"
+wildcards = "deny"
+highlight = "all"
+deny = [
+    # Standardize on aws-lc-rs / rustls / ed25519-dalek for deterministic TLS 1.3 & Ed25519 signing
+    { name = "openssl-sys", reason = "Use aws-lc-rs + rustls instead of system OpenSSL" },
+    { name = "openssl", reason = "Use aws-lc-rs + rustls instead of system OpenSSL" },
+]
+
+[sources]
+unknown-registry = "deny"
+unknown-git = "deny"
+allow-registry = ["https://github.com/rust-lang/crates.io-index"]
+allow-git = []

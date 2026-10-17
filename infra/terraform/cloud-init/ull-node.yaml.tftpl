@@ -1,0 +1,153 @@
+#cloud-config
+package_update: true
+package_upgrade: false
+packages:
+  - chrony
+  - ethtool
+  - irqbalance
+  - linux-tools-common
+  - linux-tools-aws
+  - nvme-cli
+  - jq
+  - curl
+  - ca-certificates
+
+write_files:
+  - path: /etc/sysctl.d/99-ull-trading.conf
+    permissions: "0644"
+    owner: root:root
+    content: |
+      # Disable TCP congestion window decay on idle keep-alive sockets
+      net.ipv4.tcp_slow_start_after_idle = 0
+      net.ipv4.tcp_tw_reuse = 1
+      net.ipv4.tcp_timestamps = 1
+      net.ipv4.tcp_sack = 1
+      net.ipv4.tcp_congestion_control = bbr
+      net.core.default_qdisc = fq
+
+      # Kernel socket busy-polling (50 us) for ENA RX queues
+      net.core.busy_poll = 50
+      net.core.busy_read = 50
+
+      # Socket buffer sizing (16 MB max)
+      net.core.rmem_max = 16777216
+      net.core.wmem_max = 16777216
+      net.core.rmem_default = 4194304
+      net.core.wmem_default = 4194304
+      net.core.netdev_max_backlog = 30000
+      net.core.somaxconn = 8192
+
+      # Real-time scheduling and VM determinism
+      vm.swappiness = 0
+      vm.max_map_count = 1048576
+      kernel.sched_rt_runtime_us = -1
+      kernel.numa_balancing = 0
+      fs.suid_dumpable = 0
+
+  - path: /etc/chrony/conf.d/00-aws-nitro-ptp.conf
+    permissions: "0644"
+    owner: root:root
+    content: |
+      # Discipline system clock directly against AWS Nitro PTP Hardware Clock (/dev/ptp0)
+      # Achieves <15us UTC accuracy without NTP leap-second smearing drift
+      refclock PHC /dev/ptp0 poll 0 dpoll -2 offset 0 prefer
+      makestep 0.001 3
+      maxupdateskew 5.0
+
+  - path: /etc/security/limits.d/99-bond-ull.conf
+    permissions: "0644"
+    owner: root:root
+    content: |
+      * soft memlock unlimited
+      * hard memlock unlimited
+      * soft nofile 1048576
+      * hard nofile 1048576
+      * soft rtprio 99
+      * hard rtprio 99
+      * soft core 0
+      * hard core 0
+
+  - path: /opt/bond/bin/tune-ena-irqs.sh
+    permissions: "0755"
+    owner: root:root
+    content: |
+      #!/usr/bin/env bash
+      set -euo pipefail
+      systemctl stop irqbalance || true
+      systemctl disable irqbalance || true
+
+      IFACE=$(ip route show default | awk '{print $5}' | head -n1)
+      if [ -n "$IFACE" ]; then
+        ethtool -C "$IFACE" adaptive-rx off rx-usecs 0 tx-usecs 0 || true
+        ethtool -G "$IFACE" rx 4096 tx 1024 || true
+        for IRQ in $(awk -F: "/$IFACE/ {print \$1}" /proc/interrupts | tr -d ' '); do
+          echo 4 > "/proc/irq/$IRQ/smp_affinity" || true
+        done
+      fi
+
+      # Ensure /dev/shm is sized for zero-copy SPSC Fast-Tap ring buffer
+      mount -o remount,size=4G,mode=1777 /dev/shm || true
+
+  - path: /etc/bond/ull-engine.env
+    permissions: "0600"
+    owner: root:root
+    content: |
+      BOND_ENVIRONMENT="${environment}"
+      BOND_REGION="${region}"
+      BOND_VENUE_ROLE="${venue_role}"
+      BOND_PEER_BRIDGE_IP="${peer_bridge_ip}"
+      BOND_PEER_BRIDGE_PORT="19001"
+      BOND_SHM_RING_PATH="/dev/shm/bond_fast_md.ring"
+      KALSHI_REST_URL="https://external-api.kalshi.com/trade-api/v2"
+      KALSHI_WS_URL="wss://external-api-ws.kalshi.com/trade-api/ws/v2"
+      KALSHI_API_KEY_ID_SECRET="${secrets_prefix}/kalshi/ull_exec_primary_ed25519"
+      KALSHI_PRIVATE_KEY_PATH="/etc/bond/secrets/kalshi_exec_ed25519.pem"
+      BOND_SECRETS_PREFIX="${secrets_prefix}"
+      BOND_PTP_MAX_OFFSET_NS="5000000"
+
+  - path: /etc/systemd/system/bond-ull-engine.service
+    permissions: "0644"
+    owner: root:root
+    content: |
+      [Unit]
+      Description=Project Bond Ultra-Low-Latency Rust Execution Engine (Kalshi API v2)
+      After=network-online.target chrony.service
+      Wants=network-online.target chrony.service
+
+      [Service]
+      Type=simple
+      User=ubuntu
+      WorkingDirectory=/opt/bond
+      EnvironmentFile=/etc/bond/ull-engine.env
+      ExecStartPre=+/opt/bond/bin/tune-ena-irqs.sh
+      ExecStart=/opt/bond/bin/ull-engine \
+        --kalshi-host external-api.kalshi.com \
+        --kalshi-ws-host external-api-ws.kalshi.com \
+        --metrics-listen 0.0.0.0:9102 \
+        --housekeeping-core 1 \
+        --irq-core 2 \
+        --md-core 3 \
+        --exec-core 4 \
+        --shm-ring /dev/shm/bond_fast_md.ring
+      Restart=always
+      RestartSec=1
+      LimitMEMLOCK=infinity
+      LimitNOFILE=1048576
+      LimitCORE=0
+      CPUSchedulingPolicy=fifo
+      CPUSchedulingPriority=80
+
+      [Install]
+      WantedBy=multi-user.target
+
+runcmd:
+  - mkdir -p /opt/bond/bin /var/lib/bond/wal /etc/bond/secrets
+  - chmod 0700 /etc/bond/secrets
+  - chown -R ubuntu:ubuntu /opt/bond /var/lib/bond
+  - modprobe ptp_ena || true
+  - sysctl --system
+  - systemctl restart chrony || true
+  - sed -i 's/GRUB_CMDLINE_LINUX="/GRUB_CMDLINE_LINUX="isolcpus=${isolated_cores} nohz_full=${isolated_cores} rcu_nocbs=${isolated_cores} idle=poll processor.max_cstate=0 intel_idle.max_cstate=0 tsc=reliable clocksource=tsc nosoftlockup mce=ignore_ce audit=0 transparent_hugepage=never /' /etc/default/grub
+  - update-grub || true
+  - /opt/bond/bin/tune-ena-irqs.sh
+  - systemctl daemon-reload
