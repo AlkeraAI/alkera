@@ -25,7 +25,7 @@ variable "instance_type" {
 }
 
 variable "subnet_id" {
-  description = "Subnet ID (pinned to use2-az3)"
+  description = "Subnet ID (pinned to use2-az3 inside the single us-east-2 VPC)"
   type        = string
 }
 
@@ -53,6 +53,18 @@ variable "data_plane_scrape_targets" {
   description = "List of host:port targets for Redpanda, ClickHouse, and Merger metrics"
   type        = list(string)
   default     = []
+}
+
+variable "clickhouse_host" {
+  description = "Private IP of ClickHouse replica inside the us-east-2 VPC for Grafana SQL datasource"
+  type        = string
+  default     = "127.0.0.1"
+}
+
+variable "postgres_host" {
+  description = "Private IP of PostgreSQL catalog primary inside the us-east-2 VPC for Grafana SQL datasource"
+  type        = string
+  default     = "127.0.0.1"
 }
 
 variable "tags" {

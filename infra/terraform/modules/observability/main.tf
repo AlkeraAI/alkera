@@ -16,6 +16,9 @@ resource "aws_instance" "grafana_prometheus" {
     ull_scrape_targets        = var.ull_scrape_targets
     collector_scrape_targets  = var.collector_scrape_targets
     data_plane_scrape_targets = var.data_plane_scrape_targets
+    clickhouse_host           = var.clickhouse_host
+    postgres_host             = var.postgres_host
+    master_dashboard_json     = file("${path.module}/dashboards/bond-unified-master.json")
   })
 
   metadata_options {

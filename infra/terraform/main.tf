@@ -3,7 +3,7 @@ locals {
     Project     = var.project_name
     Environment = var.environment
     ManagedBy   = "terraform"
-    ActiveScope = var.enable_polymarket ? "kalshi-and-polymarket" : "kalshi-only"
+    ActiveScope = var.enable_polymarket ? "kalshi-and-polymarket" : "kalshi-only-single-vpc"
   }
 
   use2_vpc_cidr = "10.20.0.0/16"
@@ -107,8 +107,11 @@ module "storage_lakehouse" {
 }
 
 # =============================================================================
-# 3. PRIMARY KALSHI REGION: AWS us-east-2 (Ohio)
-#    Co-located with Kalshi Direct ALB (elections-external-api-*.us-east-2.elb.amazonaws.com)
+# 3. SINGLE REGIONAL VPC IN AWS us-east-2 (Ohio, 10.20.0.0/16)
+#    When enable_polymarket = false (default), 100% of the stack (Kalshi Collectors
+#    Leg A & B, Kalshi ULL Execution Engine, Redpanda, ClickHouse, PostgreSQL, and
+#    Unified Grafana) runs inside this single VPC across use2-az1, use2-az2, use2-az3
+#    with zero VPC peering hops.
 # =============================================================================
 
 module "network_use2_ohio" {
@@ -176,7 +179,7 @@ module "kalshi_ull_ohio" {
 }
 
 # =============================================================================
-# 4. UNIFIED GRAFANA & PROMETHEUS OBSERVABILITY STACK (AWS us-east-2)
+# 4. UNIFIED GRAFANA & PROMETHEUS OBSERVABILITY STACK (Inside Single us-east-2 VPC)
 # =============================================================================
 
 module "observability" {
@@ -195,12 +198,16 @@ module "observability" {
   ull_scrape_targets        = ["${module.kalshi_ull_ohio.private_ip}:9102"]
   collector_scrape_targets  = [for ip in module.kalshi_ha_capture.collector_private_ips : "${ip}:9108"]
   data_plane_scrape_targets = [for ip in module.kalshi_ha_capture.redpanda_private_ips : "${ip}:9644"]
+  clickhouse_host           = module.kalshi_ha_capture.clickhouse_private_ips[0]
+  postgres_host             = module.kalshi_ha_capture.postgres_private_ip
   tags                      = local.common_tags
 }
 
 # =============================================================================
-# 5. OPTIONAL POLYMARKET REGIONS (eu-west-2 London & eu-west-1 Dublin)
-#    Disabled by default (enable_polymarket = false) per Kalshi-only scope
+# 5. OPTIONAL POLYMARKET EUROPEAN VPCs & CROSS-REGION PEERING
+#    Disabled by default (enable_polymarket = false). Because AWS VPCs cannot span
+#    across geographic regions, European VPCs and Inter-Region VPC Peering are only
+#    created when enable_polymarket = true.
 # =============================================================================
 
 module "network_euw2_london" {
@@ -265,4 +272,22 @@ resource "aws_vpc_peering_connection_accepter" "euw1_accept_use2" {
   tags = merge(local.common_tags, {
     Name = "${var.project_name}-${var.environment}-peering-use2-euw1-accepter"
   })
+}
+
+resource "aws_route" "use2_to_euw1_public" {
+  count    = var.enable_polymarket ? 1 : 0
+  provider = aws.us_east_2
+
+  route_table_id            = module.network_use2_ohio.public_route_table_id
+  destination_cidr_block    = local.euw1_vpc_cidr
+  vpc_peering_connection_id = aws_vpc_peering_connection.use2_to_euw1[0].id
+}
+
+resource "aws_route" "euw1_to_use2_public" {
+  count    = var.enable_polymarket ? 1 : 0
+  provider = aws.eu_west_1
+
+  route_table_id            = module.network_euw1_dublin[0].public_route_table_id
+  destination_cidr_block    = local.use2_vpc_cidr
+  vpc_peering_connection_id = aws_vpc_peering_connection.use2_to_euw1[0].id
 }

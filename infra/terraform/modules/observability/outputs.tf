@@ -17,3 +17,8 @@ output "grafana_url" {
   description = "URL of the Unified Grafana dashboard interface"
   value       = "http://${aws_eip.grafana.public_ip}:3000"
 }
+
+output "master_dashboard_uid" {
+  description = "Provisioned Unified Master Grafana Dashboard UID"
+  value       = "bond-unified-master"
+}

@@ -1,0 +1,439 @@
+{
+  "annotations": {
+    "list": [
+      {
+        "builtIn": 1,
+        "datasource": { "type": "grafana", "uid": "-- Grafana --" },
+        "enable": true,
+        "hide": true,
+        "iconColor": "rgba(0, 211, 255, 1)",
+        "name": "Annotations & Alerts",
+        "type": "dashboard"
+      }
+    ]
+  },
+  "editable": true,
+  "fiscalYearStartMonth": 0,
+  "graphTooltip": 1,
+  "id": null,
+  "links": [],
+  "panels": [
+    {
+      "collapsed": false,
+      "gridPos": { "h": 1, "w": 24, "x": 0, "y": 0 },
+      "id": 100,
+      "panels": [],
+      "title": "Row 1: Kalshi WebSocket Collectors (Leg A use2-az1 & Leg B use2-az2)",
+      "type": "row"
+    },
+    {
+      "datasource": { "type": "prometheus", "uid": "bond-prometheus" },
+      "fieldConfig": { "defaults": { "unit": "ops" }, "overrides": [] },
+      "gridPos": { "h": 7, "w": 8, "x": 0, "y": 1 },
+      "id": 101,
+      "targets": [
+        {
+          "expr": "sum by (leg, channel) (rate(alkera_ws_frames_received_total{venue=\"kalshi\"}[10s]))",
+          "legendFormat": "Leg {{leg}} - {{channel}}",
+          "refId": "A"
+        }
+      ],
+      "title": "Kalshi WS Frame Velocity (msgs/sec by Leg & Channel)",
+      "type": "timeseries"
+    },
+    {
+      "datasource": { "type": "prometheus", "uid": "bond-prometheus" },
+      "fieldConfig": { "defaults": { "unit": "ns" }, "overrides": [] },
+      "gridPos": { "h": 7, "w": 8, "x": 8, "y": 1 },
+      "id": 102,
+      "targets": [
+        {
+          "expr": "histogram_quantile(0.50, sum by (le, leg) (rate(alkera_parse_apply_duration_ns_bucket{venue=\"kalshi\"}[1m])))",
+          "legendFormat": "p50 Leg {{leg}}",
+          "refId": "A"
+        },
+        {
+          "expr": "histogram_quantile(0.99, sum by (le, leg) (rate(alkera_parse_apply_duration_ns_bucket{venue=\"kalshi\"}[1m])))",
+          "legendFormat": "p99 Leg {{leg}}",
+          "refId": "B"
+        },
+        {
+          "expr": "histogram_quantile(0.9999, sum by (le, leg) (rate(alkera_parse_apply_duration_ns_bucket{venue=\"kalshi\"}[1m])))",
+          "legendFormat": "p99.99 Leg {{leg}} (Alert >25us)",
+          "refId": "C"
+        }
+      ],
+      "title": "Hot-Path JSON Parse + Fixed-Point Book Apply Latency (ns)",
+      "type": "timeseries"
+    },
+    {
+      "datasource": { "type": "prometheus", "uid": "bond-prometheus" },
+      "fieldConfig": { "defaults": { "unit": "short" }, "overrides": [] },
+      "gridPos": { "h": 7, "w": 8, "x": 16, "y": 1 },
+      "id": 103,
+      "targets": [
+        {
+          "expr": "sum by (leg) (increase(alkera_kalshi_sid_seq_gaps_total[5m]))",
+          "legendFormat": "SID Seq Gaps (Leg {{leg}})",
+          "refId": "A"
+        },
+        {
+          "expr": "sum by (leg, status) (increase(alkera_kalshi_snapshot_recoveries_total[5m]))",
+          "legendFormat": "Snapshot Recoveries ({{leg}} {{status}})",
+          "refId": "B"
+        },
+        {
+          "expr": "sum by (leg) (rate(alkera_kalshi_ping_heartbeats_total[1m]))",
+          "legendFormat": "10s Control Ping Heartbeats ({{leg}})",
+          "refId": "C"
+        }
+      ],
+      "title": "Kalshi (sid, seq) Continuity, Snapshot Resyncs & Maintenance Heartbeats",
+      "type": "timeseries"
+    },
+    {
+      "collapsed": false,
+      "gridPos": { "h": 1, "w": 24, "x": 0, "y": 8 },
+      "id": 200,
+      "panels": [],
+      "title": "Row 2: Active-Active Stream Deduplicator & /dev/shm SPSC Fast-Tap (<80ns)",
+      "type": "row"
+    },
+    {
+      "datasource": { "type": "prometheus", "uid": "bond-prometheus" },
+      "fieldConfig": { "defaults": { "unit": "ops" }, "overrides": [] },
+      "gridPos": { "h": 7, "w": 8, "x": 0, "y": 9 },
+      "id": 201,
+      "targets": [
+        {
+          "expr": "sum by (event_kind) (rate(alkera_dedup_unique_events_emitted_total{venue=\"kalshi\"}[10s]))",
+          "legendFormat": "Canonical Emitted ({{event_kind}})",
+          "refId": "A"
+        },
+        {
+          "expr": "sum by (event_kind) (rate(alkera_dedup_duplicates_suppressed_total{venue=\"kalshi\"}[10s]))",
+          "legendFormat": "Twin Duplicates Suppressed ({{event_kind}})",
+          "refId": "B"
+        }
+      ],
+      "title": "Fast-First Deduplicator: Canonical Emitted vs. Twin Duplicates Suppressed",
+      "type": "timeseries"
+    },
+    {
+      "datasource": { "type": "prometheus", "uid": "bond-prometheus" },
+      "fieldConfig": { "defaults": { "unit": "µs" }, "overrides": [] },
+      "gridPos": { "h": 7, "w": 8, "x": 8, "y": 9 },
+      "id": 202,
+      "targets": [
+        {
+          "expr": "histogram_quantile(0.50, sum by (le) (rate(alkera_dedup_leg_skew_us_bucket{venue=\"kalshi\"}[1m])))",
+          "legendFormat": "p50 Leg A vs Leg B Skew (us)",
+          "refId": "A"
+        },
+        {
+          "expr": "histogram_quantile(0.99, sum by (le) (rate(alkera_dedup_leg_skew_us_bucket{venue=\"kalshi\"}[1m])))",
+          "legendFormat": "p99 Leg A vs Leg B Skew (us)",
+          "refId": "B"
+        }
+      ],
+      "title": "Active-Active Leg A vs. Leg B Arrival Time Skew (us)",
+      "type": "timeseries"
+    },
+    {
+      "datasource": { "type": "prometheus", "uid": "bond-prometheus" },
+      "fieldConfig": { "defaults": { "unit": "ns" }, "overrides": [] },
+      "gridPos": { "h": 7, "w": 8, "x": 16, "y": 9 },
+      "id": 203,
+      "targets": [
+        {
+          "expr": "histogram_quantile(0.99, sum by (le) (rate(ull_shm_fast_tap_lag_ns_bucket[1m])))",
+          "legendFormat": "p99 /dev/shm SPSC Fast-Tap Transfer Lag (ns)",
+          "refId": "A"
+        }
+      ],
+      "title": "/dev/shm/bond_fast_md.ring Collector -> ULL Engine Fast-Tap Lag (ns)",
+      "type": "timeseries"
+    },
+    {
+      "collapsed": false,
+      "gridPos": { "h": 1, "w": 24, "x": 0, "y": 16 },
+      "id": 300,
+      "panels": [],
+      "title": "Row 3: Local NVMe WAL Ring Spool & Redpanda 3-AZ Event Bus",
+      "type": "row"
+    },
+    {
+      "datasource": { "type": "prometheus", "uid": "bond-prometheus" },
+      "fieldConfig": { "defaults": { "unit": "Bps" }, "overrides": [] },
+      "gridPos": { "h": 7, "w": 12, "x": 0, "y": 17 },
+      "id": 301,
+      "targets": [
+        {
+          "expr": "sum by (instance) (rate(alkera_wal_spool_bytes_written_total{venue=\"kalshi\"}[10s]))",
+          "legendFormat": "NVMe WAL Spool Write ({{instance}})",
+          "refId": "A"
+        }
+      ],
+      "title": "Local NVMe Circular WAL Ring Write Throughput (Bytes/sec)",
+      "type": "timeseries"
+    },
+    {
+      "datasource": { "type": "prometheus", "uid": "bond-prometheus" },
+      "fieldConfig": { "defaults": { "unit": "short" }, "overrides": [] },
+      "gridPos": { "h": 7, "w": 12, "x": 12, "y": 17 },
+      "id": 302,
+      "targets": [
+        {
+          "expr": "sum by (topic) (rate(redpanda_kafka_request_bytes_total[10s]))",
+          "legendFormat": "Redpanda Topic {{topic}}",
+          "refId": "A"
+        },
+        {
+          "expr": "max by (instance) (alkera_wal_uncommitted_segments)",
+          "legendFormat": "Unacknowledged WAL Segments ({{instance}})",
+          "refId": "B"
+        }
+      ],
+      "title": "Redpanda Bus Throughput & Unacknowledged Local WAL Backlog",
+      "type": "timeseries"
+    },
+    {
+      "collapsed": false,
+      "gridPos": { "h": 1, "w": 24, "x": 0, "y": 24 },
+      "id": 400,
+      "panels": [],
+      "title": "Row 4: PostgreSQL HA Relational Catalog & Surrogate instrument_iid Interner",
+      "type": "row"
+    },
+    {
+      "datasource": { "type": "postgres", "uid": "bond-postgres" },
+      "fieldConfig": { "defaults": { "unit": "short" }, "overrides": [] },
+      "gridPos": { "h": 7, "w": 12, "x": 0, "y": 25 },
+      "id": 401,
+      "targets": [
+        {
+          "rawSql": "SELECT now() AS time, (SELECT count(*) FROM catalog.series WHERE venue_id = 1) AS kalshi_series, (SELECT count(*) FROM catalog.events WHERE venue_id = 1) AS kalshi_events, (SELECT count(*) FROM catalog.markets WHERE venue_id = 1 AND status = 'active') AS active_markets, (SELECT count(*) FROM catalog.instruments WHERE venue_id = 1 AND is_active = true) AS active_instruments;",
+          "refId": "A"
+        }
+      ],
+      "title": "PostgreSQL Catalog Active Kalshi Series, Events, Markets & Instruments",
+      "type": "stat"
+    },
+    {
+      "datasource": { "type": "prometheus", "uid": "bond-prometheus" },
+      "fieldConfig": { "defaults": { "unit": "ms" }, "overrides": [] },
+      "gridPos": { "h": 7, "w": 12, "x": 12, "y": 25 },
+      "id": 402,
+      "targets": [
+        {
+          "expr": "histogram_quantile(0.99, sum by (le) (rate(alkera_catalog_interner_sync_lag_ms_bucket[1m])))",
+          "legendFormat": "p99 LISTEN/NOTIFY -> ArcSwap Interner Sync (ms)",
+          "refId": "A"
+        },
+        {
+          "expr": "min by (bucket) (alkera_rest_token_bucket_available{venue=\"kalshi\"})",
+          "legendFormat": "Kalshi REST Discovery Token Headroom ({{bucket}})",
+          "refId": "B"
+        }
+      ],
+      "title": "InstrumentInterner LISTEN/NOTIFY Sync Latency (<5ms) & Discovery Token Headroom",
+      "type": "timeseries"
+    },
+    {
+      "collapsed": false,
+      "gridPos": { "h": 1, "w": 24, "x": 0, "y": 32 },
+      "id": 500,
+      "panels": [],
+      "title": "Row 5: ClickHouse Hot Store, LocalStack/S3 ZSTD-9 Parquet Lakehouse & EOD Reconciler",
+      "type": "row"
+    },
+    {
+      "datasource": { "type": "grafana-clickhouse-datasource", "uid": "bond-clickhouse" },
+      "fieldConfig": { "defaults": { "unit": "short" }, "overrides": [] },
+      "gridPos": { "h": 7, "w": 8, "x": 0, "y": 33 },
+      "id": 501,
+      "targets": [
+        {
+          "rawSql": "SELECT venue_id, countIf(healed_by_twin_leg = 1) AS twin_healed_gaps, countIf(healed_by_twin_leg = 0) AS unhealed_snapshot_resyncs, max(gap_resolved_ns - gap_start_ns) / 1e6 AS max_resync_duration_ms FROM market_data.capture_gaps WHERE gap_start_ns >= toUnixTimestamp64Nano(now64() - INTERVAL 24 HOUR) GROUP BY venue_id;",
+          "refId": "A"
+        }
+      ],
+      "title": "ClickHouse 24h Capture Gaps Audit (Twin-Healed vs. Snapshot Resyncs)",
+      "type": "table"
+    },
+    {
+      "datasource": { "type": "grafana-clickhouse-datasource", "uid": "bond-clickhouse" },
+      "fieldConfig": { "defaults": { "unit": "short" }, "overrides": [] },
+      "gridPos": { "h": 7, "w": 8, "x": 8, "y": 33 },
+      "id": 502,
+      "targets": [
+        {
+          "rawSql": "SELECT table, sum(rows) AS total_rows, round(sum(data_uncompressed_bytes) / nullIf(sum(data_compressed_bytes), 0), 2) AS compression_ratio FROM system.parts WHERE database = 'market_data' AND active = 1 GROUP BY table ORDER BY total_rows DESC;",
+          "refId": "A"
+        }
+      ],
+      "title": "ClickHouse ReplicatedReplacingMergeTree Rows & Compression Ratio",
+      "type": "table"
+    },
+    {
+      "datasource": { "type": "prometheus", "uid": "bond-prometheus" },
+      "fieldConfig": { "defaults": { "unit": "percentunit" }, "overrides": [] },
+      "gridPos": { "h": 7, "w": 8, "x": 16, "y": 33 },
+      "id": 503,
+      "targets": [
+        {
+          "expr": "min(alkera_reconciler_completeness_ratio{venue=\"kalshi\"})",
+          "legendFormat": "EOD Reconciler Trade Completeness (Target = 100.00%)",
+          "refId": "A"
+        },
+        {
+          "expr": "sum by (dataset) (increase(alkera_parquet_partitions_committed_total{venue=\"kalshi\"}[1h]))",
+          "legendFormat": "S3/LocalStack Parquet Partitions Committed ({{dataset}})",
+          "refId": "B"
+        }
+      ],
+      "title": "LocalStack/S3 Parquet Commits & EOD Reconciler Completeness Score",
+      "type": "timeseries"
+    },
+    {
+      "collapsed": false,
+      "gridPos": { "h": 1, "w": 24, "x": 0, "y": 40 },
+      "id": 600,
+      "panels": [],
+      "title": "Row 6: AWS Nitro /dev/ptp0 PTP Hardware Clock Synchronization",
+      "type": "row"
+    },
+    {
+      "datasource": { "type": "prometheus", "uid": "bond-prometheus" },
+      "fieldConfig": { "defaults": { "unit": "ns" }, "overrides": [] },
+      "gridPos": { "h": 6, "w": 12, "x": 0, "y": 41 },
+      "id": 601,
+      "targets": [
+        {
+          "expr": "alkera_ptp_clock_offset_ns",
+          "legendFormat": "PTP Offset {{instance}} (Kill-Switch Threshold: +/- 5,000,000 ns)",
+          "refId": "A"
+        }
+      ],
+      "title": "AWS Nitro /dev/ptp0 Hardware Clock Offset (ns)",
+      "type": "timeseries"
+    },
+    {
+      "datasource": { "type": "prometheus", "uid": "bond-prometheus" },
+      "fieldConfig": { "defaults": { "unit": "ns" }, "overrides": [] },
+      "gridPos": { "h": 6, "w": 12, "x": 12, "y": 41 },
+      "id": 602,
+      "targets": [
+        {
+          "expr": "alkera_ptp_max_error_ns",
+          "legendFormat": "Chrony PTP Max Error {{instance}}",
+          "refId": "A"
+        }
+      ],
+      "title": "PTP Hardware Clock Root Dispersion / Max Error (ns)",
+      "type": "timeseries"
+    },
+    {
+      "collapsed": false,
+      "gridPos": { "h": 1, "w": 24, "x": 0, "y": 47 },
+      "id": 700,
+      "panels": [],
+      "title": "Row 7: Ultra-Low-Latency (ULL) Execution Engine, Ed25519 Pre-Signed Ring & Pre-Trade Risk / Kill-Switch",
+      "type": "row"
+    },
+    {
+      "datasource": { "type": "prometheus", "uid": "bond-prometheus" },
+      "fieldConfig": { "defaults": { "unit": "ns" }, "overrides": [] },
+      "gridPos": { "h": 7, "w": 6, "x": 0, "y": 48 },
+      "id": 701,
+      "targets": [
+        {
+          "expr": "histogram_quantile(0.50, sum by (le) (rate(ull_tick_to_wire_ns_bucket[1m])))",
+          "legendFormat": "p50 Tick-to-Wire (ns)",
+          "refId": "A"
+        },
+        {
+          "expr": "histogram_quantile(0.99, sum by (le) (rate(ull_tick_to_wire_ns_bucket[1m])))",
+          "legendFormat": "p99 Tick-to-Wire (ns) [Gate <15us]",
+          "refId": "B"
+        },
+        {
+          "expr": "histogram_quantile(0.999, sum by (le) (rate(ull_tick_to_wire_ns_bucket[1m])))",
+          "legendFormat": "p99.9 Tick-to-Wire (ns)",
+          "refId": "C"
+        }
+      ],
+      "title": "ULL Internal Tick-to-Wire Latency (p50 / p99 / p99.9 ns)",
+      "type": "timeseries"
+    },
+    {
+      "datasource": { "type": "prometheus", "uid": "bond-prometheus" },
+      "fieldConfig": { "defaults": { "unit": "µs" }, "overrides": [] },
+      "gridPos": { "h": 7, "w": 6, "x": 6, "y": 48 },
+      "id": 702,
+      "targets": [
+        {
+          "expr": "ull_kalshi_pinned_alb_rtt_us",
+          "legendFormat": "Pinned Kalshi ALB IP {{alb_ip}} RTT (us)",
+          "refId": "A"
+        },
+        {
+          "expr": "ull_warm_sockets_ready_kalshi",
+          "legendFormat": "Warm TLS 1.3 Sockets Ready",
+          "refId": "B"
+        }
+      ],
+      "title": "Pinned Kalshi us-east-2 ALB RTT (us) & Warm TLS Socket Pool",
+      "type": "timeseries"
+    },
+    {
+      "datasource": { "type": "prometheus", "uid": "bond-prometheus" },
+      "fieldConfig": { "defaults": { "unit": "short" }, "overrides": [] },
+      "gridPos": { "h": 7, "w": 6, "x": 12, "y": 48 },
+      "id": 703,
+      "targets": [
+        {
+          "expr": "ull_kalshi_shard_write_tokens_available",
+          "legendFormat": "Kalshi Shard ?exchange_index={{shard}} Tokens",
+          "refId": "A"
+        },
+        {
+          "expr": "ull_kalshi_presign_future_window_ms",
+          "legendFormat": "Ed25519 Pre-Sign Ring Headroom (ms)",
+          "refId": "B"
+        }
+      ],
+      "title": "Kalshi Shard Write Token Buckets (0..3) & 256ms Pre-Sign Ring Headroom",
+      "type": "timeseries"
+    },
+    {
+      "datasource": { "type": "prometheus", "uid": "bond-prometheus" },
+      "fieldConfig": { "defaults": { "unit": "short" }, "overrides": [] },
+      "gridPos": { "h": 7, "w": 6, "x": 18, "y": 48 },
+      "id": 704,
+      "targets": [
+        {
+          "expr": "max(ull_kill_switch_engaged)",
+          "legendFormat": "Global Kill-Switch (0=ARMED, 1=TRIPPED)",
+          "refId": "A"
+        },
+        {
+          "expr": "sum by (reason) (increase(ull_risk_rejects_total[5m]))",
+          "legendFormat": "Pre-Trade Risk Reject ({{reason}})",
+          "refId": "B"
+        }
+      ],
+      "title": "Pre-Trade Risk Collar Rejects (<45ns) & <15ms Cancel-All Kill-Switch",
+      "type": "timeseries"
+    }
+  ],
+  "refresh": "1s",
+  "schemaVersion": 39,
+  "tags": ["bond", "kalshi", "ull", "ha-capture", "clickhouse", "localstack"],
+  "templating": { "list": [] },
+  "time": { "from": "now-15m", "to": "now" },
+  "timezone": "utc",
+  "title": "Project Bond — Unified Master Observability (Kalshi Capture, Lakehouse & ULL Execution)",
+  "uid": "bond-unified-master",
+  "version": 1
+}

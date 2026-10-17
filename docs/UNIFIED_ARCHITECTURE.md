@@ -1,80 +1,75 @@
 # Project Bond: Unified System Architecture, Deterministic Rust Engineering Standards, LocalStack/AWS Terraform IaC & Production Readiness Specification
 
-## 1. Executive Summary & Current Scope Decisions
+## 1. Executive Summary & Core Architectural Decisions
 
-This specification defines the unified **100% Rust** system architecture, **deterministic engineering & regression testing standards**, **Terraform Infrastructure-as-Code (`infra/terraform/` with first-class LocalStack support)**, and **production blind-spot mitigations** for **Project Bond**.
+This specification defines the unified **100% Rust** system architecture, **deterministic engineering & regression testing standards**, **Terraform Infrastructure-as-Code (`infra/terraform/` with first-class LocalStack support)**, **Unified Master Grafana Dashboard**, and **production blind-spot mitigations** for **Project Bond**.
 
 ### Core Scope & Architectural Decisions
 
-1. **Kalshi-First Active Scope (`enable_polymarket = false` by default)**:
+1. **Kalshi-First Active Scope in a Single `us-east-2` VPC (`enable_polymarket = false` by default)**:
    - **Active Focus**: All primary data capture (`alkera-collector`), cataloging (`alkera-catalog`), deduplication (`alkera-merger`), storage (`ClickHouse` + `S3 Parquet`), and ultra-low-latency execution (`ull-kalshi` + `ull-engine`) are actively focused on **Kalshi API v2 (`AWS us-east-2` Ohio)** using Ed25519 authentication (`KALSHI_API_KEY_ID` and `KALSHI_PRIVATE_KEY_PEM` / `KALSHI_PRIVATE_KEY_PATH`).
-   - **Feature-Gated Polymarket Dormancy**: Polymarket crates (`ull-polymarket`, Polymarket collector pools) and European AWS regions (`eu-west-2` London, `eu-west-1` Dublin) are preserved in the architecture and Terraform modules behind `enable_polymarket = false` (and Cargo feature flag `--features polymarket`, disabled by default) so zero Polymarket resources or credentials are required during Kalshi operations.
+   - **Single-VPC Deployment (`10.20.0.0/16` in `us-east-2`)**: Because all Kalshi workloads and the entire data/observability stack reside in `us-east-2` (Ohio), **100% of the active infrastructure runs inside a single regional AWS VPC (`10.20.0.0/16`)** spanning physical Availability Zones `use2-az1`, `use2-az2`, and `use2-az3` with **zero VPC peering hops** and sub-millisecond intra-VPC routing.
+   - **Why Optional Cross-Region Peering Exists Only When `enable_polymarket = true`**: In AWS, a VPC is a strictly regional construct—it can span multiple Availability Zones within `us-east-2`, but it cannot span across AWS regions into Europe (`eu-west-1` / `eu-west-2`). Therefore, the European VPCs and Inter-Region VPC Peering resources are gated behind `enable_polymarket = false` and are only provisioned if Polymarket is enabled in the future.
 2. **LocalStack-First AWS Infrastructure Validation (`http://localhost:4566`)**:
    - Every Terraform module under `infra/terraform/` supports a single-toggle **LocalStack mode (`use_localstack = true` via `localstack.tfvars`)** that redirects all AWS provider endpoints (`s3`, `secretsmanager`, `ssm`, `kms`, `iam`, `sts`, `ec2`) to `http://localhost:4566` with `s3_use_path_style = true`.
    - Developers and CI pipelines validate the complete Terraform plan/apply, AWS Secrets Manager key retrieval (`KALSHI_API_KEY_ID`, `KALSHI_PRIVATE_KEY_PEM`), and S3 Parquet lakehouse writes locally against LocalStack before promoting the identical HCL modules to production AWS `us-east-2`.
 3. **Unified Path 1 (ULL Execution) + Path 2 (HA Data Lakehouse) Monorepo**:
    - Shares a single canonical fixed-point schema (`crates/alkera-schema`: `PriceMicros(u32)`, `SizeMicros(i64)`, `InstrumentIid(u32)`, `MarketUid(u32)`) across both the HA data layer and the ULL execution engine.
    - Couples the co-located local `alkera-collector` and `ull-engine` via a **zero-copy `/dev/shm/bond_fast_md.ring` SPSC shared-memory fast-tap (`< 80 ns`)** so verified L2 orderbook deltas trigger execution in nanoseconds before touching Redpanda or ClickHouse.
-4. **Rigorous Deterministic Unit, Property (`proptest`), Concurrency (`loom`) & Golden-Corpus Regression Testing**:
+4. **Fully Unified Single-Pane-of-Glass Master Grafana Dashboard (`bond-unified-master.json`)**:
+   - Auto-provisions Prometheus (`1s` scrape interval), ClickHouse SQL (`market_data`), and PostgreSQL (`catalog`) datasources into a **single master Grafana dashboard** (`infra/terraform/modules/observability/dashboards/bond-unified-master.json`) spanning 7 end-to-end operational rows: (1) Kalshi WS Collectors, (2) Active-Active Deduplicator & `/dev/shm` Fast-Tap, (3) Local NVMe WAL & Redpanda Bus, (4) PostgreSQL Catalog & `instrument_iid` Interner, (5) ClickHouse Hot Store & LocalStack/S3 Parquet Lakehouse, (6) AWS Nitro `/dev/ptp0` PTP Clock Sync, and (7) ULL Execution Latency, Pre-Signed Ring & Pre-Trade Risk / Kill-Switch.
+5. **Rigorous Deterministic Unit, Property (`proptest`), Concurrency (`loom`) & Golden-Corpus Regression Testing**:
    - Enforces a 5-tier automated testing & regression gate on every commit, coupled with workspace-wide Clippy denials (`clippy::float_arithmetic`, `clippy::unwrap_used`, `clippy::expect_used`, `clippy::panic`, `unsafe_op_in_unsafe_fn`).
-5. **Unified Grafana Observability**:
-   - Single pane of glass across lock-free `AtomicU64` Prometheus exporters (`:9108/metrics` on collectors, `:9102/metrics` on ULL engine), ClickHouse SQL gap/book auditing, and PostgreSQL catalog health.
 
 ---
 
-## 2. Unified End-to-End Architecture (Kalshi `us-east-2` Primary + LocalStack Parity)
+## 2. Unified End-to-End Architecture (Single `us-east-2` VPC + LocalStack Parity)
 
-### 2.1 System Dataflow Diagram (Path 2 HA Capture + Path 1 ULL Execution)
+### 2.1 System Dataflow Diagram Inside the Single `us-east-2` VPC (`10.20.0.0/16`)
 
 ```mermaid
 flowchart TB
-    subgraph env_cfg ["1. Secrets, Config & LocalStack / AWS Control Plane"]
-        SM["AWS Secrets Manager (LocalStack :4566 or AWS us-east-2)<br/>KALSHI_API_KEY_ID + KALSHI_PRIVATE_KEY_PEM (Ed25519)"]
-        YAML["config/segments.yaml + config/risk-limits.toml"]
-        PG["PostgreSQL HA Catalog (catalog.series/events/markets/instruments)<br/>Surrogate instrument_iid: u32 + LISTEN/NOTIFY"]
+    subgraph env_cfg ["1. Secrets, KMS & Object Storage (LocalStack :4566 or AWS us-east-2)"]
+        SM["AWS Secrets Manager<br/>KALSHI_API_KEY_ID + KALSHI_PRIVATE_KEY_PEM (Ed25519)"]
+        S3["S3 Parquet Cold Lakehouse<br/>ZSTD(9) Sorted Partitions + Bloom Filters + KMS"]
     end
 
-    subgraph kalshi_use2 ["2. Kalshi Active-Active Capture & ULL Execution (AWS us-east-2 Ohio: use2-az1 & use2-az2)"]
-        K_ALB["Kalshi Direct ALB (external-api*.kalshi.com -> elections-external-api-*.us-east-2.elb.amazonaws.com)<br/>Zero CloudFront Hop (~0.5 - 1.5 ms In-Region RTT)"]
-        K_ColA["alkera-collector Leg A (use2-az1)<br/>Global WS (trade, ticker, lifecycle, oracles) + Sharded L2 WS (orderbook_delta)"]
-        K_ColB["alkera-collector Leg B (use2-az2)<br/>Independent Twin WS Subscriptions + KalshiSidTracker"]
-        K_WAL_A["alkera-wal NVMe Circular Ring Spool (Leg A)"]
-        K_WAL_B["alkera-wal NVMe Circular Ring Spool (Leg B)"]
-        K_Shm["/dev/shm/bond_fast_md.ring<br/>64-Byte Cache-Aligned SPSC Fast-Tap (<80 ns)"]
-        K_ULL["ull-engine (use2-az1 Cluster PG, Cores 2-5 Isolated)<br/>Core 3: Hot WS + Shm Reader | Core 4: Pre-Trade Risk (<45ns) + Execution"]
-        K_Ring["ull-kalshi: 256ms Ed25519 Pre-Signed Ring + 26ns Byte Splicer<br/>ull-net: Pinned ALB IP Warm TLS 1.3 Pool (?exchange_index=0..3)"]
+    subgraph single_vpc ["2. Single Regional VPC in AWS us-east-2 (Ohio, 10.20.0.0/16) Spanning Physical AZs use2-az1, use2-az2, use2-az3"]
+        direction TB
 
-        SM --> K_ColA & K_ColB & K_ULL
-        YAML --> K_ColA & K_ColB & K_ULL
-        PG <-->|"ArcSwap InstrumentInterner (<5ms)"| K_ColA & K_ColB & K_ULL
-        K_ALB -->|"WS v2 (Ed25519 Signed Handshake)"| K_ColA & K_ColB
-        K_ALB -->|"Hot WS + Private user_orders/fill"| K_ULL
-        K_ColA --> K_WAL_A
-        K_ColB --> K_WAL_B
-        K_ColA -->|"Zero-Copy Verified BBO/Delta"| K_Shm --> K_ULL
-        K_ULL --> K_Ring -->|"Single-Record TLS 1.3 Write (<1ms)"| K_ALB
+        subgraph az1 ["Physical AZ 1: use2-az1 (10.20.1.0/24 Public & 10.20.11.0/24 Private)"]
+            K_ColA["alkera-collector Leg A<br/>Global WS + Sharded L2 WS + NVMe WAL"]
+            K_Shm["/dev/shm/bond_fast_md.ring<br/>64B Zero-Copy SPSC Fast-Tap (<80ns)"]
+            K_ULL["ull-engine (Cluster Placement Group)<br/>Cores 2-5 Isolated | <45ns Risk | 26ns Ed25519 Ring Splice"]
+            PG1["PostgreSQL HA Primary<br/>catalog.* & LISTEN/NOTIFY"]
+            RP1["Redpanda Broker 0"]
+            CH1["ClickHouse Replica 0<br/>ReplicatedReplacingMergeTree"]
+            K_ColA -->|"Fast-Tap"| K_Shm --> K_ULL
+        end
+
+        subgraph az2 ["Physical AZ 2: use2-az2 (10.20.2.0/24 Public & 10.20.12.0/24 Private)"]
+            K_ColB["alkera-collector Leg B<br/>Twin WS Pool + KalshiSidTracker + NVMe WAL"]
+            Merger["alkera-merger + alkera-reconciler<br/>Fast-First xxHash3 Deduplicator & EOD Auditor"]
+            RP2["Redpanda Broker 1"]
+            CH2["ClickHouse Replica 1<br/>ReplicatedReplacingMergeTree"]
+        end
+
+        subgraph az3 ["Physical AZ 3: use2-az3 (10.20.3.0/24 Public & 10.20.13.0/24 Private)"]
+            RP3["Redpanda Broker 2 + ClickHouse Keeper"]
+            Obs["Unified Grafana + Prometheus + Alertmanager<br/>Single Master Dashboard (bond-unified-master.json)"]
+        end
     end
 
-    subgraph data_lake ["3. Deduplication, Hot Analytical Store & Cold Lakehouse"]
-        Merger["alkera-merger<br/>Fast-First xxHash3 Deduplicator + Twin-Leg Gap Healer"]
-        RP["Redpanda 3-AZ Raft Bus (rkyv Zero-Copy Binary + Zstd)"]
-        CH["ClickHouse HA (Keeper + 2x ReplicatedReplacingMergeTree)<br/>l2_deltas, l2_checkpoints, trades, tickers, lifecycle_events, capture_gaps"]
-        S3["S3 Parquet Lakehouse (LocalStack :4566 or AWS S3)<br/>Sorted ZSTD(9) + Bloom Filters on instrument_iid"]
-        Replay["alkera-replay & alkera-reconciler<br/>Nanosecond Book Reconstructor + Daily /historical/trades Auditor"]
+    K_ALB["Kalshi Direct ALB in us-east-2<br/>external-api*.kalshi.com -> elections-external-api-*.us-east-2.elb.amazonaws.com"]
 
-        K_ColA & K_ColB --> Merger --> RP
-        RP --> CH
-        RP --> S3
-        CH -.->|"14d TTL Tiering"| S3
-        CH & S3 --> Replay
-    end
-
-    subgraph obs ["4. Unified Grafana Observability"]
-        Prom["Prometheus (1s Scrape of :9108 Collector & :9102 ULL Metrics)"]
-        Grafana["Grafana Unified Dashboards (Prometheus + ClickHouse SQL + PostgreSQL)"]
-        K_ColA & K_ColB & K_ULL & Merger --> Prom --> Grafana
-        CH & PG --> Grafana
-    end
+    SM --> K_ColA & K_ColB & K_ULL
+    K_ALB <-->|"WS v2 + Pinned ALB IP REST v2 (~0.5-1.2ms)"| K_ColA & K_ColB & K_ULL
+    K_ColA & K_ColB --> Merger --> RP1 & RP2 & RP3
+    RP1 & RP2 & RP3 --> CH1 & CH2
+    RP1 & RP2 & RP3 --> S3
+    CH1 & CH2 -.->|"14d TTL Tiering"| S3
+    PG1 <--> K_ColA & K_ColB & K_ULL & Merger
+    K_ColA & K_ColB & K_ULL & Merger & CH1 & PG1 --> Obs
 ```
 
 ---
@@ -232,7 +227,7 @@ Both `alkera-collector` (when opening WebSocket connections to `wss://external-a
 
 ### 3.1 Toolchain Pinning, Reproducible Builds & Supply-Chain Auditing
 
-1. **`rust-toolchain.toml`**: Pins Rust `1.85.0`, `rustfmt`, `clippy`, and `llvm-tools-preview` across all developer hosts and CI runners.
+1. **`rust-toolchain.toml`**: Pins Rust `1.83.0`, `rustfmt`, `clippy`, and `llvm-tools-preview` across all developer hosts and CI runners.
 2. **`deny.toml` (`cargo-deny`)**: Bans `openssl-sys` (standardizing on `aws-lc-rs` + `rustls` + `ed25519-dalek`), forbids wildcard versions, enforces OSI-approved permissive licenses, and blocks RustSec advisories.
 3. **`.cargo/config.toml`**: Sets `CARGO_INCREMENTAL = "0"`, enables hardware AES/AVX2/SHA-NI instructions (`-C target-feature=+aes,+ssse3,+sse4.2,+avx2,+sha,+bmi2`), and defines aliases for deterministic lint and regression runs.
 
@@ -274,22 +269,20 @@ Every crate in the workspace must implement and pass the following five testing 
 
 ---
 
-## 4. Declarative Terraform Infrastructure (`infra/terraform/`) with LocalStack & AWS Support
+## 4. Declarative Terraform Infrastructure (`infra/terraform/`) & Unified Master Grafana Dashboard
 
-### 4.1 Dual-Target Architecture: LocalStack (`localhost:4566`) vs. Production AWS (`us-east-2`)
+### 4.1 Single `us-east-2` VPC Topology (Kalshi Default) & Optional Cross-Region Peering
 
-The Terraform configuration in `infra/terraform/` is designed so that the **exact same root module and child modules** run against **LocalStack** during local development/CI and against **AWS `us-east-2` (Ohio)** in production:
+1. **Default Kalshi-Only Mode (`enable_polymarket = false`) — Single VPC (`10.20.0.0/16`)**:
+   - Every active resource is deployed into a **single regional VPC (`module.network_use2_ohio`, `10.20.0.0/16`)** in `us-east-2` (Ohio) spanning three physical Availability Zones:
+     - **`use2-az1` (`10.20.1.0/24` Public, `10.20.11.0/24` Private)**: Hosts the **Kalshi ULL Execution Node** (`cluster` placement group), **Kalshi Collector Leg A** (linked to ULL via `/dev/shm/bond_fast_md.ring`), **PostgreSQL Catalog Primary**, **Redpanda Broker 0**, and **ClickHouse Replica 0**.
+     - **`use2-az2` (`10.20.2.0/24` Public, `10.20.12.0/24` Private)**: Hosts **Kalshi Collector Leg B** (`spread` placement group), **`alkera-merger` & `alkera-reconciler`**, **Redpanda Broker 1**, and **ClickHouse Replica 1**.
+     - **`use2-az3` (`10.20.3.0/24` Public, `10.20.13.0/24` Private)**: Hosts **Redpanda Broker 2 / ClickHouse Keeper tie-breaker** and the **Unified Grafana + Prometheus + Alertmanager** observability server.
+   - Because all components share `10.20.0.0/16`, internal traffic uses the native AWS Nitro VPC fabric with **zero NAT gateways, zero transit gateways, and zero VPC peering overhead**.
+2. **Optional Multi-Region Mode (`enable_polymarket = true`)**:
+   - Because AWS VPCs cannot span across geographic regions (`us-east-2` vs. `eu-west-1`/`eu-west-2`), setting `enable_polymarket = true` provisions the European VPCs (`10.21.0.0/16` in London and `10.22.0.0/16` in Dublin) and automatically attaches `aws_vpc_peering_connection` + `aws_route` entries so Prometheus, Redpanda, and `ull-bridge` route seamlessly across regions.
 
-- **When `use_localstack = true` (`terraform apply -var-file=localstack.tfvars`)**:
-  - Redirects all AWS provider API calls (`ec2`, `iam`, `kms`, `s3`, `secretsmanager`, `ssm`, `sts`) to `var.localstack_endpoint` (`http://localhost:4566`).
-  - Enables `s3_use_path_style = true`, `skip_credentials_validation = true`, `skip_metadata_api_check = true`, and `skip_requesting_account_id = true`.
-  - Provisions the VPC (`10.20.0.0/16`), physical AZ subnets (`use2-az1`, `use2-az2`, `use2-az3`), security groups, KMS encryption keys, S3 Parquet lakehouse bucket (`bond-local-kalshi-lakehouse`), Secrets Manager secrets (`KALSHI_API_KEY_ID`, `KALSHI_PRIVATE_KEY_PEM`), IAM instance profiles, Kalshi HA Collector Leg A & B instances, Kalshi ULL execution node, and Unified Grafana observability node inside LocalStack.
-- **When `use_localstack = false` (`terraform apply -var-file=prod.tfvars`)**:
-  - Connects directly to AWS `us-east-2` (Ohio) using real physical AZ IDs (`use2-az1`, `use2-az2`, `use2-az3`) co-located with Kalshi's `elections-external-api-107430227.us-east-2.elb.amazonaws.com` load balancer.
-- **Polymarket Toggle (`enable_polymarket = false` by default)**:
-  - All Polymarket resources (`eu-west-2` London VPC/collectors, `eu-west-1` Dublin VPC/ULL node, transatlantic VPC peering routes, and Polymarket Secrets Manager entries) are gated by `count = var.enable_polymarket ? 1 : 0` and default to `false` so `terraform apply` provisions a clean, Kalshi-only stack by default.
-
-### 4.2 Running Terraform Against LocalStack vs. AWS
+### 4.2 Dual-Target Provider: LocalStack (`localhost:4566`) vs. Production AWS (`us-east-2`)
 
 ```bash
 # 1. Initialize & Validate Terraform Modules
@@ -297,7 +290,7 @@ terraform -chdir=infra/terraform init -backend=false
 terraform -chdir=infra/terraform fmt -check -recursive
 terraform -chdir=infra/terraform validate
 
-# 2. Plan & Apply Against LocalStack (http://localhost:4566, Kalshi-only default)
+# 2. Plan & Apply Against LocalStack (http://localhost:4566, Kalshi-only single VPC default)
 terraform -chdir=infra/terraform plan -var-file=localstack.tfvars
 terraform -chdir=infra/terraform apply -auto-approve -var-file=localstack.tfvars
 
@@ -305,6 +298,22 @@ terraform -chdir=infra/terraform apply -auto-approve -var-file=localstack.tfvars
 aws --endpoint-url=http://localhost:4566 secretsmanager list-secrets --region us-east-2
 aws --endpoint-url=http://localhost:4566 s3 ls --region us-east-2
 ```
+
+---
+
+### 4.3 Fully Unified Master Grafana Dashboard (`bond-unified-master.json`)
+
+The observability module (`infra/terraform/modules/observability/dashboards/bond-unified-master.json`) auto-provisions three datasources (`Prometheus` at `1s` scrape interval, `ClickHouse` `market_data`, and `PostgreSQL` `catalog`) into **one unified master dashboard** (`uid: "bond-unified-master"`) with **7 rows** covering the entire stack end-to-end:
+
+| Row | Subsystem Covered | Datasource | Key Panels & Alert Thresholds |
+| :--- | :--- | :--- | :--- |
+| **Row 1** | **Kalshi WebSocket Collectors (Leg A & Leg B)** | Prometheus (`:9108`) | 1. WS Frame Velocity (`rate(alkera_ws_frames_received_total{venue="kalshi"}[10s])` by `leg`, `channel`).<br>2. Active Subscribed Markets & Healthy WS Shards (`alkera_active_instruments_subscribed`, `alkera_active_ws_connections`).<br>3. Parse + Fixed-Point Book Apply Latency (`alkera_parse_apply_duration_ns` p50/p99/p99.99; **Alert `> 25 µs`**).<br>4. Kalshi `(sid, seq)` Gaps, Snapshot Recoveries & Thursday Maintenance `Ping` Heartbeats (`alkera_kalshi_sid_seq_gaps_total`, `alkera_kalshi_ping_heartbeats_total`). |
+| **Row 2** | **Active-Active Deduplicator & `/dev/shm` Fast-Tap** | Prometheus (`:9108`) + ClickHouse SQL | 1. Canonical Unique vs. Suppressed Duplicate Event Rate (`alkera_dedup_unique_events_emitted_total` vs. `alkera_dedup_duplicates_suppressed_total`; **Alert if duplicate ratio `== 0` for `30s`**).<br>2. Leg A vs. Leg B Arrival Time Skew (`alkera_dedup_leg_skew_us` p50/p99).<br>3. Twin-Healed vs. Unhealed Gap Audit (`SELECT countIf(healed_by_twin_leg=1), countIf(healed_by_twin_leg=0) FROM market_data.capture_gaps`).<br>4. `/dev/shm/bond_fast_md.ring` SPSC Fast-Tap Read Lag (`ull_shm_fast_tap_lag_ns` p99 `< 100 ns`). |
+| **Row 3** | **Local NVMe WAL Ring Spool & Redpanda Event Bus** | Prometheus (`:9108`, `:9644`) | 1. NVMe WAL Write Throughput (`rate(alkera_wal_spool_bytes_written_total[10s])`).<br>2. Uncommitted WAL Ring Backlog (`alkera_wal_uncommitted_segments`, `0` during normal Redpanda operation).<br>3. Redpanda Raft Topic Throughput & Consumer Group Lag (`redpanda_kafka_max_offset - committed_offset`). |
+| **Row 4** | **PostgreSQL Relational Catalog & Surrogate `instrument_iid` Interner** | PostgreSQL (`catalog`) + Prometheus | 1. Active Catalog Entities (`SELECT count() FROM catalog.series, catalog.events, catalog.markets, catalog.instruments WHERE is_active`).<br>2. `LISTEN/NOTIFY` (`catalog_instrument_updates`) Outbox Propagation Latency (`alkera_catalog_interner_sync_lag_ms` `< 5 ms`).<br>3. REST Discovery Token-Bucket Headroom (`alkera_rest_token_bucket_available{venue="kalshi"}`). |
+| **Row 5** | **ClickHouse Hot Store, LocalStack/S3 Parquet Lakehouse & EOD Reconciler** | ClickHouse SQL + Prometheus | 1. ClickHouse Row Insert Velocity & Block Deduplication (`market_data.l2_deltas`, `l2_checkpoints`, `trades`, `tickers`).<br>2. ClickHouse Columnar Compression Ratio (`sum(data_uncompressed_bytes) / sum(data_compressed_bytes)` from `system.parts`).<br>3. LocalStack / S3 `ZSTD(9)` Parquet Partition Commits (`alkera_parquet_partitions_committed_total`).<br>4. `alkera-reconciler` EOD Trade & Position Completeness Score (`alkera_reconciler_completeness_ratio` == `1.0000` / `100.00%`). |
+| **Row 6** | **AWS Nitro `/dev/ptp0` PTP Hardware Clock Discipline** | Prometheus (`:9108`, `:9102`) | 1. PTP Clock Offset to AWS Atomic Reference (`alkera_ptp_clock_offset_ns` per node; **Critical Alert if `|offset| > 5,000,000 ns` (`5 ms`)**).<br>2. PTP Root Dispersion / Max Error (`alkera_ptp_max_error_ns`). |
+| **Row 7** | **ULL Execution Engine, Ed25519 Pre-Signed Ring & Pre-Trade Risk / Kill-Switch** | Prometheus (`:9102`) | 1. Internal Tick-to-Wire Latency (`ull_tick_to_wire_ns` p50/p90/p99/p99.9; **Alert if `p99 > 25 µs`**).<br>2. Kalshi Ed25519 256ms Pre-Signed Ring Future Headroom (`ull_kalshi_presign_future_window_ms`; **Alert if `< 100 ms`**).<br>3. Pinned Kalshi ALB IP Wire RTT (`ull_kalshi_pinned_alb_rtt_us` `< 1,500 µs`) & Warm TLS Socket Pool Ready Count (`ull_warm_sockets_ready_kalshi` `>= 6`).<br>4. Per-Shard Kalshi Write Token Bucket Balance (`exchange_index=0..3`) & HTTP `429` Rejects.<br>5. Pre-Trade Risk Collar Rejects (`ull_risk_rejects_total` by `reason`) & Global Kill-Switch Status (`ull_kill_switch_engaged` `0 = ARMED/OK`, `1 = TRIPPED`). |
 
 ---
 
@@ -319,7 +328,7 @@ Even with sub-20-microsecond execution and active-active data capture, productio
      - `kalshi/capture_leg_a_ed25519` (`KALSHI_API_KEY_ID` + `KALSHI_PRIVATE_KEY_PEM` for Collector Leg A)
      - `kalshi/capture_leg_b_ed25519` (`KALSHI_API_KEY_ID` + `KALSHI_PRIVATE_KEY_PEM` for Collector Leg B)
      - `kalshi/ull_exec_primary_ed25519` (Primary key for `ull-engine`)
-     - `kalshi/ull_exec_secondary_ed25519` (Secondary standby key for zero-downtime rotation)
+     - `kalshi/ull_exec_standby_ed25519` (Secondary standby key for zero-downtime rotation)
    - Rate-limit isolation & blast-radius containment: A key rotation or compromise on a collector node never affects the ULL execution node, and rotating `ull_exec_primary_ed25519` swaps the `ArcSwap<SigningKey>` pointer on `SIGHUP` in `0 ns` without dropping open orders.
 2. **Process Memory Hardening**:
    - Call `libc::mlockall(libc::MCL_CURRENT | libc::MCL_FUTURE)` on startup so private keys and pre-signed rings are never swapped to disk.

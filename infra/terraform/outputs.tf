@@ -4,8 +4,30 @@ output "localstack_mode_enabled" {
 }
 
 output "polymarket_enabled" {
-  description = "Whether Polymarket resources are enabled (false = Kalshi-only active focus)"
+  description = "Whether Polymarket resources are enabled (false = Kalshi-only single VPC in us-east-2)"
   value       = var.enable_polymarket
+}
+
+output "aws_caller_account_id" {
+  description = "Resolved AWS Account ID from STS (or 'localstack' when use_localstack = true)"
+  value       = var.use_localstack ? "000000000000" : data.aws_caller_identity.current[0].account_id
+}
+
+output "use2_az_name_to_id_map" {
+  description = "Account-specific mapping of randomized AZ names (us-east-2a/b/c) to physical AZ IDs (use2-az1/az2/az3) in us-east-2"
+  value = var.use_localstack ? {
+    "us-east-2a" = "use2-az1"
+    "us-east-2b" = "use2-az2"
+    "us-east-2c" = "use2-az3"
+    } : {
+    for idx, name in data.aws_availability_zones.use2[0].names :
+    name => data.aws_availability_zones.use2[0].zone_ids[idx]
+  }
+}
+
+output "single_use2_vpc_id" {
+  description = "ID of the single AWS us-east-2 (Ohio) VPC hosting all Kalshi capture, ULL execution, data, and Grafana services"
+  value       = module.network_use2_ohio.vpc_id
 }
 
 output "s3_lakehouse_bucket_name" {
@@ -37,7 +59,7 @@ output "kalshi_ha_collectors" {
 }
 
 output "data_plane_endpoints" {
-  description = "Internal endpoints for PostgreSQL Catalog, Redpanda, and ClickHouse in us-east-2"
+  description = "Internal endpoints for PostgreSQL Catalog, Redpanda, and ClickHouse inside the us-east-2 VPC"
   value = {
     postgres_catalog_ip = module.kalshi_ha_capture.postgres_private_ip
     redpanda_ips        = module.kalshi_ha_capture.redpanda_private_ips
@@ -45,7 +67,10 @@ output "data_plane_endpoints" {
   }
 }
 
-output "grafana_observability_url" {
-  description = "Unified Grafana dashboard URL"
-  value       = module.observability.grafana_url
+output "grafana_observability" {
+  description = "Unified Grafana dashboard URL and provisioned Master Dashboard UID"
+  value = {
+    url                  = module.observability.grafana_url
+    master_dashboard_uid = module.observability.master_dashboard_uid
+  }
 }

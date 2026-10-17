@@ -19,6 +19,9 @@ write_files:
           environment: "${environment}"
           project: "bond"
 
+      rule_files:
+        - /etc/prometheus/alerts.yml
+
       scrape_configs:
         - job_name: "bond-ull-engines"
           static_configs:
@@ -60,8 +63,68 @@ write_files:
                 severity: warning
               annotations:
                 summary: "ULL Engine p99 internal tick-to-wire latency exceeded 25 microseconds"
+            - alert: BondKillSwitchTripped
+              expr: max(ull_kill_switch_engaged) > 0
+              for: 1s
+              labels:
+                severity: critical
+              annotations:
+                summary: "ULL Pre-Trade Risk / Dead-Man Kill-Switch engaged (Cancel-All fired)"
+
+  - path: /etc/grafana/provisioning/datasources/bond-datasources.yaml
+    permissions: "0644"
+    owner: root:root
+    content: |
+      apiVersion: 1
+      datasources:
+        - name: Prometheus
+          uid: bond-prometheus
+          type: prometheus
+          access: proxy
+          url: http://localhost:9090
+          isDefault: true
+          jsonData:
+            timeInterval: "1s"
+        - name: ClickHouse
+          uid: bond-clickhouse
+          type: grafana-clickhouse-datasource
+          access: proxy
+          jsonData:
+            defaultDatabase: market_data
+            host: "${clickhouse_host}"
+            port: 9000
+            protocol: native
+        - name: PostgreSQL
+          uid: bond-postgres
+          type: postgres
+          url: "${postgres_host}:5432"
+          database: market_catalog
+          user: catalog
+          jsonData:
+            sslmode: "disable"
+
+  - path: /etc/grafana/provisioning/dashboards/bond-dashboards.yaml
+    permissions: "0644"
+    owner: root:root
+    content: |
+      apiVersion: 1
+      providers:
+        - name: "Project Bond Unified Master Dashboard"
+          orgId: 1
+          folder: "Project Bond"
+          type: file
+          disableDeletion: true
+          editable: true
+          options:
+            path: /var/lib/grafana/dashboards
+
+  - path: /var/lib/grafana/dashboards/bond-unified-master.json
+    permissions: "0644"
+    owner: root:root
+    content: |
+      ${indent(6, master_dashboard_json)}
 
 runcmd:
-  - mkdir -p /var/lib/prometheus /var/lib/grafana
+  - mkdir -p /var/lib/prometheus /var/lib/grafana/dashboards /etc/grafana/provisioning/datasources /etc/grafana/provisioning/dashboards
   - modprobe ptp_ena || true
   - systemctl restart chrony || true
